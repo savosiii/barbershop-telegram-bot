@@ -29,7 +29,7 @@ db.execute("""CREATE TABLE IF NOT EXISTS bookings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER, name TEXT, service TEXT, date TEXT, time TEXT,
     reminded INTEGER DEFAULT 0)""")
-# Миграция старой базы: добавляем колонку reminded, если её нет
+# Если база была создана старой версией бота — дорисуем нужную колонку
 cols = [r[1] for r in db.execute("PRAGMA table_info(bookings)")]
 if "reminded" not in cols:
     db.execute("ALTER TABLE bookings ADD COLUMN reminded INTEGER DEFAULT 0")
@@ -64,18 +64,20 @@ def fmt_date(d):
 
 @dp.message(CommandStart())
 async def start(m: Message):
-    await m.answer("Привет! Я бот барбершопа. Что хотите сделать?", reply_markup=menu)
+    await m.answer(
+        "Привет! 👋\nЗдесь можно записаться к барберу, посмотреть прайс "
+        "или узнать, где нас найти. Выбирайте:", reply_markup=menu)
 
 
 @dp.message(F.text == "Прайс")
 async def price(m: Message):
     lines = [f"• {t} — {p} ₽" for t, p in SERVICES.values()]
-    await m.answer("Наши услуги:\n" + "\n".join(lines))
+    await m.answer("Что делаем и за сколько:\n" + "\n".join(lines))
 
 
 @dp.message(F.text == "Контакты")
 async def contacts(m: Message):
-    await m.answer("📍 ул. Примерная, 1\n📞 +7 900 000-00-00\n🕙 Ежедневно 10:00-20:00")
+    await m.answer("📍 ул. Примерная, 1\n📞 +7 900 000-00-00\n🕙 Ежедневно 10:00–20:00")
 
 
 @dp.message(F.text == "Записаться")
@@ -86,7 +88,7 @@ async def book_start(m: Message, state: FSMContext):
         kb.button(text=f"{title} — {p} ₽", callback_data=f"svc:{key}")
     kb.adjust(1)
     await state.set_state(Booking.service)
-    await m.answer("Выберите услугу:", reply_markup=kb.as_markup())
+    await m.answer("Что записываем?", reply_markup=kb.as_markup())
 
 
 @dp.callback_query(Booking.service, F.data.startswith("svc:"))
@@ -98,7 +100,7 @@ async def choose_service(c: CallbackQuery, state: FSMContext):
         kb.button(text=d.strftime("%d.%m"), callback_data=f"date:{d.isoformat()}")
     kb.adjust(4)
     await state.set_state(Booking.date)
-    await c.message.edit_text("Выберите дату:", reply_markup=kb.as_markup())
+    await c.message.edit_text("На какой день?", reply_markup=kb.as_markup())
     await c.answer()
 
 
@@ -108,14 +110,15 @@ async def choose_date(c: CallbackQuery, state: FSMContext):
     await state.update_data(date=d)
     free = [t for t in TIMES if not is_busy(d, t)]
     if not free:
-        await c.answer("На эту дату всё занято, выберите другую", show_alert=True)
+        await c.answer("Этот день полностью забит — посмотрите другой",
+                       show_alert=True)
         return
     kb = InlineKeyboardBuilder()
     for t in free:
         kb.button(text=t, callback_data=f"time:{t}")
     kb.adjust(3)
     await state.set_state(Booking.time)
-    await c.message.edit_text("Выберите время:", reply_markup=kb.as_markup())
+    await c.message.edit_text("Время свободное:", reply_markup=kb.as_markup())
     await c.answer()
 
 
@@ -124,7 +127,8 @@ async def choose_time(c: CallbackQuery, state: FSMContext):
     t = c.data.split(":", 1)[1]
     data = await state.get_data()
     if is_busy(data["date"], t):
-        await c.answer("Это время только что заняли, выберите другое", show_alert=True)
+        await c.answer("Упс, это время только что забили. Другое возьмёте?",
+                       show_alert=True)
         return
     title, p = SERVICES[data["service"]]
     name = c.from_user.full_name
@@ -133,10 +137,11 @@ async def choose_time(c: CallbackQuery, state: FSMContext):
     db.commit()
     await state.clear()
     await c.message.edit_text(
-        f"✅ Вы записаны!\n{title}, {fmt_date(data['date'])} в {t}\nЦена: {p} ₽")
+        f"Готово, вы записаны! ✅\n{title}, {fmt_date(data['date'])} в {t}.\n"
+        f"Если планы поменяются — запись можно отменить в «Моих записях».")
     await bot.send_message(
         OWNER_ID,
-        f"🔔 Новая запись\n{name}\n{title}\n{fmt_date(data['date'])} в {t}")
+        f"🔔 Новая запись: {name}\n{title}, {fmt_date(data['date'])} в {t}")
     await c.answer()
 
 
@@ -147,14 +152,15 @@ async def my_bookings(m: Message):
         "WHERE user_id=? AND date>=? ORDER BY date, time",
         (m.from_user.id, date.today().isoformat())).fetchall()
     if not rows:
-        await m.answer("У вас нет предстоящих записей.")
+        await m.answer("Пока записей нет. Хотите записаться — жмите «Записаться».")
         return
     kb = InlineKeyboardBuilder()
     for bid, svc, d, t in rows:
         kb.button(text=f"❌ Отменить: {svc}, {fmt_date(d)} {t}",
                   callback_data=f"cancel:{bid}")
     kb.adjust(1)
-    await m.answer("Ваши записи:", reply_markup=kb.as_markup())
+    await m.answer("Ваши записи — отменить можно кнопкой ниже:",
+                   reply_markup=kb.as_markup())
 
 
 @dp.callback_query(F.data.startswith("cancel:"))
@@ -163,18 +169,18 @@ async def cancel_booking(c: CallbackQuery):
     row = db.execute("SELECT user_id, service, date, time FROM bookings WHERE id=?",
                      (bid,)).fetchone()
     if not row or row[0] != c.from_user.id:
-        await c.answer("Запись не найдена", show_alert=True)
+        await c.answer("Не нашёл такую запись", show_alert=True)
         return
     db.execute("DELETE FROM bookings WHERE id=?", (bid,))
     db.commit()
-    await c.message.edit_text("❌ Запись отменена.")
+    await c.message.edit_text("Запись отменена. Если передумаете — мы тут.")
     await bot.send_message(
         OWNER_ID,
-        f"🚫 Клиент отменил запись\n{row[1]}\n{fmt_date(row[2])} в {row[3]}")
+        f"🚫 Клиент отменил запись\n{row[1]}, {fmt_date(row[2])} в {row[3]}")
     await c.answer()
 
 
-# ---------- Админка для владельца ----------
+# ---------- Команды для владельца ----------
 
 @dp.message(Command("today"))
 async def today_schedule(m: Message):
@@ -184,10 +190,10 @@ async def today_schedule(m: Message):
         "SELECT name, service, date, time FROM bookings WHERE date=? ORDER BY time",
         (date.today().isoformat(),)).fetchall()
     if not rows:
-        await m.answer("На сегодня записей нет.")
+        await m.answer("На сегодня записей нет — можно выдохнуть.")
         return
     text = "\n".join(f"{t} — {name}, {svc}" for name, svc, d, t in rows)
-    await m.answer(f"📋 Записи на сегодня:\n{text}")
+    await m.answer(f"📋 Сегодня к вам идут:\n{text}")
 
 
 @dp.message(Command("week"))
@@ -200,12 +206,13 @@ async def week_schedule(m: Message):
         (date.today().isoformat(),
          (date.today() + timedelta(days=7)).isoformat())).fetchall()
     if not rows:
-        await m.answer("На ближайшую неделю записей нет.")
+        await m.answer("На неделю вперёд записей нет.")
         return
     text = "\n".join(f"{fmt_date(d)} {t} — {name}, {svc}" for d, t, name, svc in rows)
     await m.answer(f"📅 Расписание на неделю:\n{text}")
 
 
+# ---------- Напоминания клиентам за день до визита ----------
 
 async def reminder_loop():
     while True:
@@ -216,12 +223,13 @@ async def reminder_loop():
         for bid, uid, svc, d, t in rows:
             try:
                 await bot.send_message(
-                    uid, f"⏰ Напоминание: завтра в {t} — {svc}. Ждём вас!")
+                    uid, f"Напоминаем: завтра в {t} у вас {svc.lower()}. "
+                         f"До встречи! ✂️")
                 db.execute("UPDATE bookings SET reminded=1 WHERE id=?", (bid,))
                 db.commit()
             except Exception:
-                pass  # пользователь заблокировал бота
-        await asyncio.sleep(3600)  # проверка раз в час
+                pass  # пользователь заблокировал бота — пропускаем
+        await asyncio.sleep(3600)  # проверяем раз в час
 
 
 async def main():
