@@ -139,7 +139,6 @@ async def abort_booking(c: CallbackQuery, state: FSMContext):
     await state.clear()
     await c.message.edit_text("Ок, записываться не будем. Если передумаете — "
                               "жмите «Записаться» в меню.")
-    await c.message.answer("Кнопки меню на месте 👇", reply_markup=menu)
     await c.answer()
 
 
@@ -181,9 +180,6 @@ async def choose_time(c: CallbackQuery, state: FSMContext):
     await c.message.edit_text(
         f"Готово, вы записаны! ✅\n{title}, {fmt_date(data['date'])} в {t}.\n"
         f"Если планы поменяются — запись можно отменить в «Моих записях».")
-    # отдельным сообщением вернём постоянную клавиатуру —
-    # она не цепляется к edit_text, а клиенты Telegram её теряют после перезапуска
-    await c.message.answer("Кнопки меню на месте 👇", reply_markup=menu)
     await bot.send_message(
         OWNER_ID,
         f"🔔 Новая запись: {name}\n{title}, {fmt_date(data['date'])} в {t}")
@@ -220,7 +216,6 @@ async def cancel_booking(c: CallbackQuery):
     db.execute("DELETE FROM bookings WHERE id=?", (bid,))
     db.commit()
     await c.message.edit_text("Запись отменена. Если передумаете — мы тут.")
-    await c.message.answer("Кнопки меню на месте 👇", reply_markup=menu)
     await bot.send_message(
         OWNER_ID,
         f"🚫 Клиент отменил запись\n{row[1]}, {fmt_date(row[2])} в {row[3]}")
