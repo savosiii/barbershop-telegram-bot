@@ -69,18 +69,19 @@ async def start(m: Message):
         "или узнать, где нас найти. Выбирайте:", reply_markup=menu)
 
 
-@dp.message(F.text == "Прайс")
+@dp.message(F.text.lower() == "прайс")
 async def price(m: Message):
     lines = [f"• {t} — {p} ₽" for t, p in SERVICES.values()]
-    await m.answer("Что делаем и за сколько:\n" + "\n".join(lines))
+    await m.answer("Что делаем и за сколько:\n" + "\n".join(lines), reply_markup=menu)
 
 
-@dp.message(F.text == "Контакты")
+@dp.message(F.text.lower() == "контакты")
 async def contacts(m: Message):
-    await m.answer("📍 ул. Примерная, 1\n📞 +7 900 000-00-00\n🕙 Ежедневно 10:00–20:00")
+    await m.answer("📍 ул. Примерная, 1\n📞 +7 900 000-00-00\n🕙 Ежедневно 10:00–20:00",
+                   reply_markup=menu)
 
 
-@dp.message(F.text == "Записаться")
+@dp.message(F.text.lower() == "записаться")
 async def book_start(m: Message, state: FSMContext):
     await state.clear()
     kb = InlineKeyboardBuilder()
@@ -148,7 +149,7 @@ async def choose_time(c: CallbackQuery, state: FSMContext):
     await c.answer()
 
 
-@dp.message(F.text == "Мои записи")
+@dp.message(F.text.lower() == "мои записи")
 async def my_bookings(m: Message):
     rows = db.execute(
         "SELECT id, service, date, time FROM bookings "
@@ -215,6 +216,15 @@ async def week_schedule(m: Message):
         return
     text = "\n".join(f"{fmt_date(d)} {t} — {name}, {svc}" for d, t, name, svc in rows)
     await m.answer(f"📅 Расписание на неделю:\n{text}")
+
+
+# ---------- Любое другое сообщение ----------
+
+@dp.message()
+async def anything_else(m: Message):
+    """Поймает всё, что не совпало с кнопками и командами выше."""
+    await m.answer("Я пока понимаю только кнопки ниже 👇 "
+                   "(или команды /start, /today, /week)", reply_markup=menu)
 
 
 # ---------- Напоминания клиентам за день до визита ----------
