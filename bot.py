@@ -62,6 +62,37 @@ def fmt_date(d):
     return datetime.strptime(d, "%Y-%m-%d").strftime("%d.%m.%Y")
 
 
+def service_kb():
+    """Клавиатура выбора услуги (первый шаг записи)."""
+    kb = InlineKeyboardBuilder()
+    for key, (title, p) in SERVICES.items():
+        kb.button(text=f"{title} — {p} ₽", callback_data=f"svc:{key}")
+    kb.button(text="✖ Отмена", callback_data="abort")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def date_kb():
+    """Клавиатура выбора даты + кнопка назад к услугам."""
+    kb = InlineKeyboardBuilder()
+    for i in range(1, 8):
+        d = date.today() + timedelta(days=i)
+        kb.button(text=d.strftime("%d.%m"), callback_data=f"date:{d.isoformat()}")
+    kb.button(text="◀ Назад", callback_data="back:svc")
+    kb.adjust(4)
+    return kb.as_markup()
+
+
+def time_kb(free):
+    """Клавиатура выбора времени + кнопка назад к датам."""
+    kb = InlineKeyboardBuilder()
+    for t in free:
+        kb.button(text=t, callback_data=f"time:{t}")
+    kb.button(text="◀ Назад", callback_data="back:date")
+    kb.adjust(3)
+    return kb.as_markup()
+
+
 @dp.message(CommandStart())
 async def start(m: Message):
     await m.answer(
@@ -84,24 +115,31 @@ async def contacts(m: Message):
 @dp.message(F.text.lower() == "записаться")
 async def book_start(m: Message, state: FSMContext):
     await state.clear()
-    kb = InlineKeyboardBuilder()
-    for key, (title, p) in SERVICES.items():
-        kb.button(text=f"{title} — {p} ₽", callback_data=f"svc:{key}")
-    kb.adjust(1)
     await state.set_state(Booking.service)
-    await m.answer("Что записываем?", reply_markup=kb.as_markup())
+    await m.answer("Что записываем?", reply_markup=service_kb())
 
 
 @dp.callback_query(Booking.service, F.data.startswith("svc:"))
 async def choose_service(c: CallbackQuery, state: FSMContext):
     await state.update_data(service=c.data.split(":")[1])
-    kb = InlineKeyboardBuilder()
-    for i in range(1, 8):
-        d = date.today() + timedelta(days=i)
-        kb.button(text=d.strftime("%d.%m"), callback_data=f"date:{d.isoformat()}")
-    kb.adjust(4)
     await state.set_state(Booking.date)
-    await c.message.edit_text("На какой день?", reply_markup=kb.as_markup())
+    await c.message.edit_text("На какой день?", reply_markup=date_kb())
+    await c.answer()
+
+
+@dp.callback_query(Booking.date, F.data == "back:svc")
+async def back_to_service(c: CallbackQuery, state: FSMContext):
+    await state.set_state(Booking.service)
+    await c.message.edit_text("Что записываем?", reply_markup=service_kb())
+    await c.answer()
+
+
+@dp.callback_query(F.data == "abort")
+async def abort_booking(c: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await c.message.edit_text("Ок, записываться не будем. Если передумаете — "
+                              "жмите «Записаться» в меню.")
+    await c.message.answer("Кнопки меню на месте 👇", reply_markup=menu)
     await c.answer()
 
 
@@ -114,12 +152,15 @@ async def choose_date(c: CallbackQuery, state: FSMContext):
         await c.answer("Этот день полностью забит — посмотрите другой",
                        show_alert=True)
         return
-    kb = InlineKeyboardBuilder()
-    for t in free:
-        kb.button(text=t, callback_data=f"time:{t}")
-    kb.adjust(3)
     await state.set_state(Booking.time)
-    await c.message.edit_text("Время свободное:", reply_markup=kb.as_markup())
+    await c.message.edit_text("Время свободное:", reply_markup=time_kb(free))
+    await c.answer()
+
+
+@dp.callback_query(Booking.time, F.data == "back:date")
+async def back_to_date(c: CallbackQuery, state: FSMContext):
+    await state.set_state(Booking.date)
+    await c.message.edit_text("На какой день?", reply_markup=date_kb())
     await c.answer()
 
 
