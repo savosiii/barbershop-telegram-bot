@@ -139,6 +139,9 @@ async def choose_time(c: CallbackQuery, state: FSMContext):
     await c.message.edit_text(
         f"Готово, вы записаны! ✅\n{title}, {fmt_date(data['date'])} в {t}.\n"
         f"Если планы поменяются — запись можно отменить в «Моих записях».")
+    # отдельным сообщением вернём постоянную клавиатуру —
+    # она не цепляется к edit_text, а клиенты Telegram её теряют после перезапуска
+    await c.message.answer("Кнопки меню на месте 👇", reply_markup=menu)
     await bot.send_message(
         OWNER_ID,
         f"🔔 Новая запись: {name}\n{title}, {fmt_date(data['date'])} в {t}")
@@ -152,7 +155,8 @@ async def my_bookings(m: Message):
         "WHERE user_id=? AND date>=? ORDER BY date, time",
         (m.from_user.id, date.today().isoformat())).fetchall()
     if not rows:
-        await m.answer("Пока записей нет. Хотите записаться — жмите «Записаться».")
+        await m.answer("Пока записей нет. Хотите записаться — жмите «Записаться».",
+                       reply_markup=menu)
         return
     kb = InlineKeyboardBuilder()
     for bid, svc, d, t in rows:
@@ -174,6 +178,7 @@ async def cancel_booking(c: CallbackQuery):
     db.execute("DELETE FROM bookings WHERE id=?", (bid,))
     db.commit()
     await c.message.edit_text("Запись отменена. Если передумаете — мы тут.")
+    await c.message.answer("Кнопки меню на месте 👇", reply_markup=menu)
     await bot.send_message(
         OWNER_ID,
         f"🚫 Клиент отменил запись\n{row[1]}, {fmt_date(row[2])} в {row[3]}")
